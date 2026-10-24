@@ -1,0 +1,48 @@
+claude-code-go
+Copyright (c) 2026 Truto
+
+This module drives the Claude Code CLI over the stream-json control protocol.
+Its protocol handling (the control request and response flow, permission
+prompts, hook callbacks, in-process MCP servers, the CLI flags and the message
+parsing) was ported to Go from Anthropic's Python Agent SDK,
+claude-agent-sdk-python 0.2.170 (commit dd27b70), files
+src/claude_agent_sdk/_internal/query.py,
+src/claude_agent_sdk/_internal/transport/subprocess_cli.py,
+src/claude_agent_sdk/types.py and
+src/claude_agent_sdk/_internal/message_parser.py:
+
+  https://github.com/anthropics/claude-agent-sdk-python
+
+No source was copied; the Go code is new, but its behaviour follows that
+SDK. That SDK is distributed under the following licence:
+
+----------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2025 Anthropic, PBC
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.----------------------------------------------------------------------------
+
+The port was also cross-checked against severity1/claude-agent-sdk-go
+(commit d167fbe), https://github.com/severity1/claude-agent-sdk-go. No code
+was taken from it. It is distributed under the MIT licence,
+Copyright (c) 2025 John Reilly Pospos.
+
+"Claude" and "Claude Code" are trademarks of Anthropic, PBC. This module is
+not made, endorsed or supported by Anthropic.
