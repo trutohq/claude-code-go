@@ -38,8 +38,8 @@ claude -p --input-format=stream-json --output-format=stream-json --verbose
   SIGTERM the group, wait again, SIGKILL.
 - **Cleanup of what the agent left running.** When the CLI exits, two steps run:
   - The driver SIGKILLs the CLI's process group.
-  - The CLI starts its Bash tool shells, hooks and pty host **detached** (`setsid`; binary
-    strings show `{type:"bash",...,detached:!0,...}`), so those leave the group. The group kill
+  - The CLI starts its Bash tool shells, hooks and pty host **detached** (in their own
+    sessions, as observed with `ps`), so those leave the group. The group kill
     does not reach them, nor a dev server such a shell started. To cover them, the driver puts a
     random marker in the CLI's environment, `CCGO_AGENT_SESSION=<id>`, which every child
     inherits (`setsid` does not remove it). On Linux it then scans `/proc/*/environ` for that
@@ -74,10 +74,8 @@ claude -p --input-format=stream-json --output-format=stream-json --verbose
 - **Settings files: none by default.** `--setting-sources=` (empty) loads no user, project or
   local settings, so a `.claude/settings.json` committed to the repo the agent works on cannot add
   `permissions.allow` rules or hooks that bypass the `PermissionFunc`.
-  - Evidence (2.1.296 strings): the flag parser is `if(e==="")return[]` and otherwise splits the
-    value on `,`, rejecting anything but `user`, `project` and `local`. The CLI builds the same
-    `--setting-sources=<v>` form when it relaunches itself, and the Python SDK sends
-    `--setting-sources=` with an empty list.
+  - The empty value is accepted and means no sources; anything but `user`, `project` and `local`
+    is refused. The Python SDK sends `--setting-sources=` with an empty list too.
   - Live: the login still works (auth is not a setting), and the user's SessionStart hook stopped
     running.
   - Not loaded either: project skills, agents and commands under `.claude/`, and the automatic
@@ -101,7 +99,7 @@ claude -p --input-format=stream-json --output-format=stream-json --verbose
   - **`--plugin-dir=<dir>` loads both**: `<dir>/agents/*.md` and `<dir>/skills/<name>/SKILL.md` show
     as `<plugin>:<name>` (the name in `<dir>/.claude-plugin/plugin.json`, else the folder's name).
     Repeatable. For plugin agents the CLI ignores `permissionMode`, `hooks` and `mcpServers` (and
-    `initialPrompt`, `observer*`) with a warning (strings: `m3t=["permissionMode","hooks","mcpServers"]`),
+    `initialPrompt`, `observer*`) with a warning on stderr,
     and takes `name`, `description`, `tools`, `skills`, `model`, `effort`, `color`, `memory`,
     `isolation`, `background`; an agent file over 1 MiB is skipped.
   - A host that needs agents and skills with no setting sources can write a plugin directory of
@@ -115,12 +113,9 @@ claude -p --input-format=stream-json --output-format=stream-json --verbose
     and write it again before every start. In-process hooks (`Extra.Hooks`) are separate: they are
     registered through the control protocol.
   - `--settings={"disableSkillShellExecution": true}` is accepted with no setting sources (no
-    warning on stderr). The setting's description (2.1.296 strings): "Disable inline shell
-    execution in skills and custom slash commands from user, project, or plugin sources. Commands
-    are replaced with a placeholder instead of being run." Pass it (through `ExtraArgs`) when a run
-    loads skills you do not want to run shell commands. That the placeholder replaces a command at skill load was read from the code
-    (`disableSkillShellExecution===!0` → the `` !`...` `` patterns are replaced), not exercised:
-    invoking a skill needs a model turn.
+    warning on stderr). It is the CLI's documented setting for turning off inline shell commands
+    in skills and custom slash commands. Pass it (through `ExtraArgs`) when a run loads skills you
+    do not want to run shell commands. Not exercised here: invoking a skill needs a model turn.
   - Not verified here (needs a login and a model turn): that the model sees the plugin's agents in the
     Task tool and the skills in its skill list, and the init line's `agents`/`skills`/`plugins` keys.
     `TestRealCLI` would show them on a machine with a login.
