@@ -71,6 +71,28 @@ claude -p --input-format=stream-json --output-format=stream-json --verbose
     - `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1`, for `session_state_changed` lines.
     - `CLAUDE_CONFIG_DIR=<Options.ConfigDir>` when set. Use one per login.
     - `CCGO_AGENT_SESSION=<random id>`, the cleanup marker described above (`SessionMarkerEnv`).
+- **Credentials through a pipe (`Options.Credential`).** A token from `claude setup-token`
+  (`oauth_token`) or an API key (`api_key`) is written into a pipe before the CLI starts. The CLI
+  gets the read end as fd 3 and reads it once at start-up. The variable that names it is
+  `CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR=3` or `CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR=3`. The
+  secret is never in the CLI's environment, its command line or a file. With a Credential set,
+  the CLI's other credential variables (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `CLAUDE_CODE_OAUTH_TOKEN` and the two `*_FILE_DESCRIPTOR` names) are dropped from the inherited
+  environment and refused in `Options.Env`. Probed on 2.1.296 and 2.1.312 (2026-10-29) with an
+  empty `CLAUDE_CONFIG_DIR`, a scratch `HOME` and bogus secrets (`TestRealCLICredential`):
+  - The `initialize` reply's `account.tokenSource` is `CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR`
+    for a token. For a key, `apiKeySource` is `ANTHROPIC_API_KEY`, the name the CLI gives a key
+    from either source.
+  - The first message fails with `api_error_status` 401: "Failed to authenticate. API Error: 401
+    OAuth access token is invalid." or "Invalid API key · Fix external API key", with
+    `total_cost_usd` 0. The assistant line carries `"error":"authentication_failed"`.
+  - **A token must look like one.** A token without the `sk-ant-oat01-` prefix was not used: the
+    answer was "Not logged in · Please run /login" (still with status 401).
+  - Hooks the CLI started before and after the failed call (`SessionStart`, `UserPromptSubmit`,
+    `StopFailure`) had neither the secret in their environment nor fd 3 open. The CLI keeps
+    fd 3 open, drained. Nothing in the config dir or `HOME` held the secret afterwards. Not
+    checked: the Bash tool's shells (that needs a model turn), which the CLI starts as it starts
+    hooks.
 - **Settings files: none by default.** `--setting-sources=` (empty) loads no user, project or
   local settings, so a `.claude/settings.json` committed to the repo the agent works on cannot add
   `permissions.allow` rules or hooks that bypass the `PermissionFunc`.

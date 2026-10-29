@@ -251,12 +251,44 @@ func (s *Session) spawn(binary string, args, env []string) error {
 	cmd.Stdin = inR
 	cmd.Stdout = outW
 	cmd.Stderr = errW
+	var credR *os.File
+	if c := s.opts.Credential; c != nil {
+		// The secret goes through a pipe the CLI reads once at start-up
+		// (fd 3, named by *_FILE_DESCRIPTOR): never the environment, the
+		// command line or a file. It is written and the write end closed
+		// before the CLI starts; it fits the pipe buffer (validate).
+		r, w, perr := os.Pipe()
+		if perr == nil {
+			_, perr = io.WriteString(w, c.Secret)
+			if cerr := w.Close(); perr == nil {
+				perr = cerr
+			}
+			if perr != nil {
+				r.Close()
+			}
+		}
+		if perr != nil {
+			inR.Close()
+			inW.Close()
+			outR.Close()
+			outW.Close()
+			errR.Close()
+			errW.Close()
+			return fmt.Errorf("claudecode: credential pipe: %w", perr)
+		}
+		credR = r
+		cmd.ExtraFiles = []*os.File{r}
+		cmd.Env = append(append([]string(nil), env...), credentialFDVar[c.Kind]+"=3")
+	}
 	setProcAttrs(cmd)
 	err = cmd.Start()
 	// The child has its own copies now (or failed to start).
 	inR.Close()
 	outW.Close()
 	errW.Close()
+	if credR != nil {
+		credR.Close()
+	}
 	if err != nil {
 		inW.Close()
 		outR.Close()

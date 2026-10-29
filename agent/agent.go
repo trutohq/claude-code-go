@@ -144,9 +144,38 @@ type Options struct {
 	BinaryPath string
 	// ConfigDir selects the agent's config/login directory.
 	ConfigDir string
+	// Credential signs the agent in for this session with a token or an
+	// API key, instead of a login kept in ConfigDir. A driver hands it to
+	// the agent without putting it in the agent's environment, its command
+	// line or a file (Claude Code: a pipe named by *_FILE_DESCRIPTOR), and
+	// refuses the session when it cannot.
+	Credential *Credential
 	// ExtraArgs are appended to the command line verbatim.
 	ExtraArgs []string
 }
+
+// Credential kinds.
+const (
+	// CredentialOAuthToken is a long-lived subscription token (Claude
+	// Code: `claude setup-token`).
+	CredentialOAuthToken = "oauth_token"
+	// CredentialAPIKey is an API key billed per token.
+	CredentialAPIKey = "api_key"
+)
+
+// Credential is a secret that signs the agent in.
+type Credential struct {
+	// Kind is CredentialOAuthToken or CredentialAPIKey.
+	Kind string
+	// Secret is the token or key.
+	Secret string
+}
+
+// String never shows the secret.
+func (c Credential) String() string { return "agent.Credential{" + c.Kind + "}" }
+
+// GoString never shows the secret (%#v).
+func (c Credential) GoString() string { return c.String() }
 
 // Priority says when a message sent mid-run is delivered.
 type Priority string

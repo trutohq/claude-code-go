@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -222,6 +223,9 @@ func validate(opts agent.Options) error {
 	if opts.WorkDir == "" {
 		return errors.New("claudecode: WorkDir is required")
 	}
+	if err := validateCredential(opts); err != nil {
+		return err
+	}
 	for _, d := range opts.PluginDirs {
 		if !filepath.IsAbs(d) {
 			return fmt.Errorf("claudecode: plugin dir %q must be an absolute path", d)
@@ -267,6 +271,45 @@ func validate(opts agent.Options) error {
 			if len(t.InputSchema) > 0 && !json.Valid(t.InputSchema) {
 				return fmt.Errorf("claudecode: tool %s/%s has an invalid input schema", srv.Name, t.Name)
 			}
+		}
+	}
+	return nil
+}
+
+// maxCredentialBytes bounds a credential: it is written into a pipe before
+// the CLI starts, so it must fit the smallest pipe buffer (16 KiB on macOS).
+const maxCredentialBytes = 4096
+
+// credentialFDVar is the variable that names the pipe the CLI reads each
+// credential kind from.
+var credentialFDVar = map[string]string{
+	agent.CredentialOAuthToken: "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+	agent.CredentialAPIKey:     "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
+}
+
+// credentialVars are the CLI's other ways to receive a credential. With a
+// Credential set, none may come from Options.Env: the CLI would pick one of
+// two credentials, and the variable would show the secret to the agent.
+var credentialVars = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
+	"CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR", "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR"}
+
+func validateCredential(opts agent.Options) error {
+	c := opts.Credential
+	if c == nil {
+		return nil
+	}
+	if _, ok := credentialFDVar[c.Kind]; !ok {
+		return fmt.Errorf("claudecode: credential kind %q cannot be passed through a file descriptor (use %s or %s)", c.Kind, agent.CredentialOAuthToken, agent.CredentialAPIKey)
+	}
+	if strings.TrimSpace(c.Secret) == "" {
+		return errors.New("claudecode: the credential is empty")
+	}
+	if len(c.Secret) > maxCredentialBytes || strings.ContainsAny(c.Secret, "\x00\r\n") {
+		return fmt.Errorf("claudecode: the credential must be one line of at most %d bytes", maxCredentialBytes)
+	}
+	for _, k := range credentialVars {
+		if _, ok := opts.Env[k]; ok {
+			return fmt.Errorf("claudecode: Options.Env sets %s while a Credential is given", k)
 		}
 	}
 	return nil
@@ -438,6 +481,9 @@ func buildEnv(base []string, opts agent.Options, marker string) []string {
 		}
 		if !opts.InheritEnv && !isAllowedVar(k) {
 			continue
+		}
+		if opts.Credential != nil && slices.Contains(credentialVars, k) {
+			continue // the Credential is the only one the CLI gets
 		}
 		set(k, v)
 	}

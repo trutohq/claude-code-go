@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -120,6 +121,28 @@ func fakeMain() int {
 		}
 		wd, _ := os.Getwd()
 		env["_cwd"] = wd
+		// The whole environment, for scans that a secret is not in it.
+		_ = os.WriteFile(filepath.Join(logDir, "environ.txt"), []byte(strings.Join(os.Environ(), "\n")), 0o644)
+		// A credential passed through a pipe, read as the CLI does.
+		for _, k := range []string{"CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR", "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR"} {
+			v, ok := os.LookupEnv(k)
+			if !ok {
+				continue
+			}
+			var fd int
+			if _, err := fmt.Sscanf(v, "%d", &fd); err != nil {
+				continue
+			}
+			f := os.NewFile(uintptr(fd), "credential")
+			b, err := io.ReadAll(f)
+			f.Close()
+			got := map[string]string{"var": k, "secret": string(b)}
+			if err != nil {
+				got["error"] = err.Error()
+			}
+			out, _ := json.Marshal(got)
+			_ = os.WriteFile(filepath.Join(logDir, "credential.json"), out, 0o644)
+		}
 		b, _ = json.Marshal(env)
 		_ = os.WriteFile(filepath.Join(logDir, "env.json"), b, 0o644)
 	}

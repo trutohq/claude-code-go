@@ -1247,3 +1247,64 @@ func TestInheritEnvOption(t *testing.T) {
 		t.Error("parent-session variable passed with InheritEnv")
 	}
 }
+
+// A Credential reaches the CLI only through a pipe named by
+// *_FILE_DESCRIPTOR: never its environment or its command line, and a
+// credential variable of the host's is not passed next to it.
+func TestCredentialThroughAPipe(t *testing.T) {
+	for _, c := range []struct{ kind, fdVar string }{
+		{agent.CredentialOAuthToken, "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"},
+		{agent.CredentialAPIKey, "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR"},
+	} {
+		t.Run(c.kind, func(t *testing.T) {
+			secret := "sk-ant-test-" + c.kind + "-do-not-leak"
+			t.Setenv("ANTHROPIC_API_KEY", "host-key-do-not-pass")
+			h := mustStart(t, []step{initOK()}, agent.Options{InheritEnv: true, Credential: &agent.Credential{Kind: c.kind, Secret: secret}})
+			_ = h.s.Close()
+			h.drain()
+			b, err := os.ReadFile(filepath.Join(h.dir, "credential.json"))
+			if err != nil {
+				t.Fatalf("the fake CLI read no credential: %v", err)
+			}
+			var got map[string]string
+			if err := json.Unmarshal(b, &got); err != nil || got["var"] != c.fdVar || got["secret"] != secret || got["error"] != "" {
+				t.Fatalf("credential read through the pipe: %s", b)
+			}
+			environ, err := os.ReadFile(filepath.Join(h.dir, "environ.txt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(environ), secret) || strings.Contains(string(environ), "host-key-do-not-pass") {
+				t.Errorf("a credential is in the CLI's environment:\n%s", environ)
+			}
+			if !strings.Contains(string(environ), c.fdVar+"=3") {
+				t.Errorf("%s=3 is not in the CLI's environment", c.fdVar)
+			}
+			if strings.Contains(strings.Join(h.args(), " "), secret) {
+				t.Errorf("the credential is on the command line: %v", h.args())
+			}
+			if strings.Contains(fmt.Sprintf("%v %+v %#v", h.s.Info(), agent.Credential{Kind: c.kind, Secret: secret}, &agent.Credential{Kind: c.kind, Secret: secret}), secret) {
+				t.Error("formatting a credential shows the secret")
+			}
+		})
+	}
+}
+
+func TestCredentialRefusals(t *testing.T) {
+	for name, opts := range map[string]agent.Options{
+		"unknown kind":  {Credential: &agent.Credential{Kind: "login", Secret: "x"}},
+		"empty secret":  {Credential: &agent.Credential{Kind: agent.CredentialAPIKey, Secret: "  "}},
+		"two lines":     {Credential: &agent.Credential{Kind: agent.CredentialAPIKey, Secret: "a\nb"}},
+		"too long":      {Credential: &agent.Credential{Kind: agent.CredentialAPIKey, Secret: strings.Repeat("a", 4097)}},
+		"also in Env":   {Credential: &agent.Credential{Kind: agent.CredentialOAuthToken, Secret: "x"}, Env: map[string]string{"ANTHROPIC_API_KEY": "y"}},
+		"fd var in Env": {Credential: &agent.Credential{Kind: agent.CredentialOAuthToken, Secret: "x"}, Env: map[string]string{"CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR": "4"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := start(t, nil, []step{initOK()}, opts, claudecode.Extra{}); err == nil {
+				t.Fatal("started")
+			} else if strings.Contains(err.Error(), "x\"") {
+				t.Fatalf("the error shows the secret: %v", err)
+			}
+		})
+	}
+}
