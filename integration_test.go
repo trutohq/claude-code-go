@@ -242,3 +242,71 @@ func sortedKeys(m map[string]json.RawMessage) []string {
 	sort.Strings(out)
 	return out
 }
+
+// TestRealCLICredential checks that the installed claude reads a Credential
+// from the pipe: with a bogus token or key, an empty config dir and a
+// scratch HOME (no login anywhere), the first message must fail with an
+// authentication error (401), not "not logged in". The bogus credential is
+// refused before any model call, so it costs nothing.
+//
+//	CCGO_CLAUDE_CRED_IT=1 [CCGO_CLAUDE_BIN=...] go test -run TestRealCLICredential -v .
+func TestRealCLICredential(t *testing.T) {
+	if os.Getenv("CCGO_CLAUDE_CRED_IT") != "1" {
+		t.Skip("set CCGO_CLAUDE_CRED_IT=1 to run against the installed claude CLI")
+	}
+	// In the shapes the CLI expects; a token without the sk-ant-oat01-
+	// prefix was not taken as one (2.1.296: "Not logged in").
+	bogus := map[string]string{
+		agent.CredentialOAuthToken: "sk-ant-oat01-bogus-0000000000000000000000000000000000000000",
+		agent.CredentialAPIKey:     "sk-ant-api03-bogus-0000000000000000000000000000000000000000",
+	}
+	for _, kind := range []string{agent.CredentialOAuthToken, agent.CredentialAPIKey} {
+		t.Run(kind, func(t *testing.T) {
+			home := t.TempDir()
+			cfg := filepath.Join(home, "config")
+			if err := os.MkdirAll(cfg, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			d := claudecode.New()
+			d.AllowUntestedVersion = os.Getenv("CCGO_CLAUDE_ALLOW_UNTESTED") == "1"
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			s, err := d.Start(ctx, agent.Options{
+				WorkDir: t.TempDir(), SessionID: newUUID(t), Model: "haiku", MaxTurns: 1,
+				BinaryPath: os.Getenv("CCGO_CLAUDE_BIN"), ConfigDir: cfg,
+				Env:        map[string]string{"HOME": home},
+				Credential: &agent.Credential{Kind: kind, Secret: bogus[kind]},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			if err := s.Send(ctx, agent.UserMessage{Text: "Say hi."}); err != nil {
+				t.Fatal(err)
+			}
+			for ev := range s.Events() {
+				if ev.Kind == agent.KindInit {
+					t.Logf("init: apiKeySource %s", gjson(ev.Raw, "apiKeySource"))
+				}
+				if ev.Kind != agent.KindResult {
+					continue
+				}
+				t.Logf("result: %s", ev.Raw)
+				if !strings.Contains(string(ev.Raw), `"api_error_status":401`) {
+					t.Fatalf("not an authentication error: %s", ev.Raw)
+				}
+				if strings.Contains(strings.ToLower(string(ev.Raw)), "not logged in") {
+					t.Fatalf("the CLI did not read the credential: %s", ev.Raw)
+				}
+				return
+			}
+			t.Fatal("no result")
+		})
+	}
+}
+
+func gjson(raw []byte, key string) string {
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	return fmt.Sprint(m[key])
+}
