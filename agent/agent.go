@@ -515,6 +515,94 @@ type ExitError struct {
 	Result string
 }
 
+// reasonMax bounds the length of Reason's text.
+const reasonMax = 300
+
+// Reason says in one line why the process stopped: the error the agent
+// reported last, else the line of its stderr that names the error, else
+// its exit code or signal ("it exited with code 3"). A stack trace's
+// frames ("    at f (file.js:1:2)", "goroutine 1 [running]:") and a
+// runtime's footer ("Node.js v22.3.0") are skipped: the error line above
+// them is the reason.
+func (e *ExitError) Reason() string {
+	if r := oneLine(e.Result); r != "" {
+		return r
+	}
+	if r := stderrReason(e.Stderr); r != "" {
+		return r
+	}
+	if e.Signal != "" {
+		return "it was stopped by signal " + e.Signal
+	}
+	return fmt.Sprintf("it exited with code %d", e.Code)
+}
+
+// stderrReason picks the line of a stderr tail that names the error: the
+// last one that looks like an error, else the last line that is not part
+// of a stack trace.
+func stderrReason(stderr string) string {
+	var last, lastErr string
+	for _, l := range strings.Split(stderr, "\n") {
+		l = strings.TrimRight(l, " \t\r")
+		t := strings.TrimSpace(l)
+		if t == "" || stackLine(l, t) {
+			continue
+		}
+		last = t
+		if errorLine(t) {
+			lastErr = t
+		}
+	}
+	if lastErr != "" {
+		return oneLine(lastErr)
+	}
+	return oneLine(last)
+}
+
+// stackLine says whether a stderr line is part of a stack trace or a
+// runtime's footer rather than the error itself. l is the line, t trimmed.
+func stackLine(l, t string) bool {
+	indented := l != "" && (l[0] == ' ' || l[0] == '\t')
+	switch {
+	case indented && strings.HasPrefix(t, "at "): // Node, Java
+	case indented && strings.HasPrefix(t, "/"): // Go's file:line under a frame
+	case strings.HasPrefix(t, "Node.js v"), strings.HasPrefix(t, "Bun v"):
+	case strings.HasPrefix(t, "goroutine ") && strings.HasSuffix(t, ":"):
+	case t == "^": // Node's pointer under the source line
+	case strings.HasPrefix(t, "Traceback ("), strings.HasPrefix(t, "File \""):
+	case strings.HasPrefix(t, "exit status "):
+	default:
+		return false
+	}
+	return true
+}
+
+// errorLine says whether a stderr line names an error.
+func errorLine(t string) bool {
+	low := strings.ToLower(t)
+	for _, p := range []string{"error", "panic:", "fatal", "uncaught", "exception"} {
+		if strings.HasPrefix(low, p) {
+			return true
+		}
+	}
+	// "TypeError: x", "ENOENT: no such file", "node:internal/x:12 Error: y"
+	for _, p := range []string{"error:", "exception:", "panic:", "fatal:"} {
+		if strings.Contains(low, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// oneLine is s on one line, cut to reasonMax runes.
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > reasonMax {
+		s = string(r[:reasonMax-1]) + "…"
+	}
+	return s
+}
+
 func (e *ExitError) Error() string {
 	var b strings.Builder
 	if e.Signal != "" {

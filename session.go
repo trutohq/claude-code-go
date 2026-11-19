@@ -24,8 +24,9 @@ const (
 	// maxLineBytes bounds one stdout line. Longer lines are delivered
 	// truncated, as KindUnknown with a ParseError.
 	maxLineBytes = 64 << 20
-	// drainGrace is how long the reader may keep draining stdout after the
-	// CLI exits before leftover children holding the pipe are killed.
+	// drainGrace is how long the readers may keep draining stdout and
+	// stderr after the CLI exits before leftover children holding the
+	// pipes are killed, and again after the kill before the pipes close.
 	drainGrace = 2 * time.Second
 	// markerSweepBound bounds the search for processes the session left.
 	markerSweepBound = 2 * time.Second
@@ -309,16 +310,21 @@ func (s *Session) spawn(binary string, args, env []string) error {
 func (s *Session) waitProcess() {
 	err := s.cmd.Wait()
 	close(s.exited)
-	// Give the reader a moment to drain what the CLI wrote before exiting.
-	select {
-	case <-s.readerDone:
-	case <-time.After(drainGrace):
-	}
+	// Give both readers a moment to drain what the CLI wrote before
+	// exiting: its last result on stdout and its last error lines on
+	// stderr are the reason for a crash. Both pipes reach their end as
+	// soon as nothing else holds them open.
+	s.awaitReaders(drainGrace)
 	// Background commands the agent started outlive the CLI otherwise, and
 	// may hold the output pipes open. The group kill gets the CLI's direct
 	// children; the marker sweep gets the ones it started with setsid.
 	killGroup(s.cmd.Process.Pid)
 	killMarked(s.marker, markerSweepBound)
+	// With those gone the pipes end by themselves, and a reader that had
+	// no CPU yet (a busy computer) still reads every line. Closing a pipe
+	// drops what is unread in it, so it is closed only for a process that
+	// escaped both kills and still holds it.
+	s.awaitReaders(drainGrace)
 	s.stdout.Close()
 	s.stderr.Close()
 	<-s.readerDone
@@ -332,6 +338,20 @@ func (s *Session) waitProcess() {
 	s.waitErr = s.exitError(err)
 	s.q.close()
 	close(s.done)
+}
+
+// awaitReaders waits until the stdout and stderr readers have both reached
+// the end of their pipes, or until limit has passed.
+func (s *Session) awaitReaders(limit time.Duration) {
+	t := time.NewTimer(limit)
+	defer t.Stop()
+	for _, done := range []chan struct{}{s.readerDone, s.stderrDone} {
+		select {
+		case <-done:
+		case <-t.C:
+			return
+		}
+	}
 }
 
 func (s *Session) exitError(err error) error {
@@ -1024,8 +1044,15 @@ func hasKey(obj json.RawMessage, key string) bool {
 	return ok
 }
 
+// stderrReadDelay holds the stderr reader back before its first read: a
+// test's stand-in for a busy computer. Zero outside tests.
+var stderrReadDelay time.Duration
+
 func (s *Session) readStderr() {
 	defer close(s.stderrDone)
+	if stderrReadDelay > 0 {
+		time.Sleep(stderrReadDelay)
+	}
 	br := bufio.NewReaderSize(s.stderr, 64<<10)
 	for {
 		line, err := readLine(br, maxLineBytes)
