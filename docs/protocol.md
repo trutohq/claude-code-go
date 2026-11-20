@@ -144,6 +144,11 @@ claude -p --input-format=stream-json --output-format=stream-json --verbose
 - Exit: after stdin EOF the CLI finishes the run and exits 0. After an error result
   (`error_max_turns`, an API error) it exits non-zero on purpose, so the driver puts the result's
   error text into `agent.ExitError.Result`. stderr is kept as a 40-line tail.
+  After the exit the driver reads both stdout and stderr to their end before `Wait` returns (a
+  pipe is closed early only when a leftover process escaped the kills and still holds it), so the
+  last result and the last stderr lines are kept whatever order they and the exit arrive in.
+  `agent.ExitError.Reason()` gives the reason on one line: the error result, else the stderr line
+  that names the error (stack frames and Node's `Node.js vN` footer skipped), else the exit code.
 
 ## Lines
 

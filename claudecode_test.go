@@ -567,6 +567,45 @@ func TestProcessCrash(t *testing.T) {
 	}
 }
 
+// crashSteps is a CLI that writes its reason to stderr and exits at once,
+// with no pause between the two.
+func crashSteps() []step {
+	return []step{
+		initOK(),
+		{"op": "stderr", "text": "Error: something broke"},
+		{"op": "exit", "code": 3},
+	}
+}
+
+// checkCrashReason says whether a crashed session kept its exit code and
+// its last stderr line.
+func checkCrashReason(t *testing.T, h *harness) {
+	t.Helper()
+	err := h.drain()
+	var ee *agent.ExitError
+	if !errors.As(err, &ee) || ee.Code != 3 || !strings.Contains(ee.Stderr, "something broke") {
+		t.Fatalf("Wait = %#v, want code 3 with the stderr line", err)
+	}
+	if r := ee.Reason(); r != "Error: something broke" {
+		t.Errorf("Reason = %q", r)
+	}
+}
+
+// A stderr reader that has not run yet when the CLI exits (a busy
+// computer) still reads the CLI's last lines: the pipe is not closed
+// under it while its lines are unread.
+func TestCrashReasonKeptWhenStderrIsReadLate(t *testing.T) {
+	claudecode.SetStderrReadDelay(t, 300*time.Millisecond)
+	checkCrashReason(t, mustStart(t, crashSteps(), agent.Options{}))
+}
+
+// The same without the delay: the exit and the last stderr line arrive in
+// whatever order the computer gives them. Run it many times (-count) to
+// see the order vary.
+func TestCrashReasonKeptWhateverTheOrder(t *testing.T) {
+	checkCrashReason(t, mustStart(t, crashSteps(), agent.Options{}))
+}
+
 func TestErrorResultExit(t *testing.T) {
 	h := mustStart(t, []step{
 		initOK(),
