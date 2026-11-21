@@ -1,6 +1,11 @@
 # claude-code-go
 
-A Go driver for the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI. It starts `claude` as a subprocess and speaks the stream-json control protocol that Anthropic's Agent SDKs use: streamed messages, permission prompts, questions to a person, hook callbacks, in-process MCP tools, interrupts and resume.
+[![Go Reference](https://pkg.go.dev/badge/github.com/trutohq/claude-code-go.svg)](https://pkg.go.dev/github.com/trutohq/claude-code-go)
+[![CI](https://github.com/trutohq/claude-code-go/actions/workflows/ci.yml/badge.svg)](https://github.com/trutohq/claude-code-go/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/trutohq/claude-code-go)](https://goreportcard.com/report/github.com/trutohq/claude-code-go)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+A Go SDK for the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI. It starts `claude` as a subprocess and speaks the stream-json control protocol that Anthropic's Agent SDKs use: streamed messages, permission prompts, questions to a person, hook callbacks, in-process MCP tools, interrupts and resume.
 
 It is written for programs that run coding agents unattended: the defaults load no settings files, pass the host's environment through an allowlist, and kill everything the agent started when the session ends.
 
